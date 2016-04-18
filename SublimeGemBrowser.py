@@ -15,17 +15,12 @@ class ListGemsCommand(sublime_plugin.WindowCommand):
     PATTERN_GEM_VERSION = "\* (.*)"
     PATTERN_GEM_NAME = "(.*)\("
     GEMS_NOT_FOUND = 'Gems Not Found'
-    
-    def run(self):        
+
+    def run(self):
         self.app_path_mac = None
         output = self.run_subprocess("bundle list")
         if output != None:
           gems = []
-
-          if sys.version_info < (3, 0):
-            output = str(output)
-          else:
-            output = str(output, encoding = 'utf-8')
 
           for line in output.split('\n'):
               gem_name_version = re.search(self.PATTERN_GEM_VERSION, line)
@@ -39,86 +34,40 @@ class ListGemsCommand(sublime_plugin.WindowCommand):
           self.window.show_quick_panel(self.gem_list, self.on_done)
         else:
           sublime.error_message('Error getting the output, the shell could probably not be loaded or There are no Gemfile in this project.')
-    
+
     def on_done(self, picked):
         if self.gem_list[picked] != self.GEMS_NOT_FOUND and picked != -1:
             gem_name = re.search(self.PATTERN_GEM_NAME,self.gem_list[picked]).group(1)
             output = self.run_subprocess("bundle show " + gem_name)
             if output != None:
-                self.sublime_command_line(['-n', output.rstrip()]) 
+                self.open_folder_in_new_window(output.rstrip())
 
-    def get_sublime_path(self):
-        if sublime.platform() == 'osx':
-            if not self.app_path_mac:
-                # taken from https://github.com/freewizard/SublimeGotoFolder/blob/master/GotoFolder.py:
-                from ctypes import cdll, byref, Structure, c_int, c_char_p, c_void_p
-                from ctypes.util import find_library
-                Foundation = cdll.LoadLibrary(find_library('Foundation'))
-                CFBundleGetMainBundle = Foundation.CFBundleGetMainBundle
-                CFBundleGetMainBundle.restype = c_void_p
-                bundle = CFBundleGetMainBundle()
-                CFBundleCopyBundleURL = Foundation.CFBundleCopyBundleURL
-                CFBundleCopyBundleURL.argtypes = [c_void_p]
-                CFBundleCopyBundleURL.restype = c_void_p
-                url = CFBundleCopyBundleURL(bundle)
-                CFURLCopyFileSystemPath = Foundation.CFURLCopyFileSystemPath
-                CFURLCopyFileSystemPath.argtypes = [c_void_p, c_int]
-                CFURLCopyFileSystemPath.restype = c_void_p
-                path = CFURLCopyFileSystemPath(url, c_int(0))
-                CFStringGetCStringPtr = Foundation.CFStringGetCStringPtr
-                CFStringGetCStringPtr.argtypes = [c_void_p, c_int]
-                CFStringGetCStringPtr.restype = c_char_p
-                self.app_path_mac = CFStringGetCStringPtr(path, 0)
-                CFRelease = Foundation.CFRelease
-                CFRelease.argtypes = [c_void_p]
-                CFRelease(path)
-                CFRelease(url)
-            return self.app_path_mac.decode() + '/Contents/SharedSupport/bin/subl'
-        if sublime.platform() == 'linux':
-            return open('/proc/self/cmdline').read().split(chr(0))[0]
-        return sys.executable
+    def open_folder_in_new_window(self, folder):
+        sublime.run_command("new_window")
+        print('-----')
+        print(folder)
+        sublime.active_window().set_project_data({"folders": [{"path": folder}]})
 
     def run_subprocess(self, command):
         current_path = pipes.quote(self.gemfile_folder())
-        if current_path == None: return None
-        command_with_cd = 'cd ' + current_path + ' && ' + command
+        if current_path == None:
+            return None
 
-        # Search for RVM
-        shell_process = subprocess.Popen(" if [ -f $HOME/.rvm/bin/rvm-auto-ruby ]; then echo $HOME/.rvm/bin/rvm-auto-ruby; fi", stdout=subprocess.PIPE, shell=True)
-        rvm_executable = shell_process.communicate()[0].rstrip()
-        
-        if rvm_executable != b'':
-            rvm_command = 'cd ' + current_path + ' && $HOME/.rvm/bin/rvm-auto-ruby -S ' + command
-            process = subprocess.Popen(rvm_command, stdout=subprocess.PIPE, shell=True)
-            return process.communicate()[0]
-        else: #Search for rbenv
-            rbenv_command = os.path.expanduser('~/.rbenv/shims/' + command)
-            process = subprocess.Popen(rbenv_command.split(), cwd=current_path, stdout=subprocess.PIPE)
-            output = process.communicate()[0]
-            if output != b'':
-              return output
-            else: # Try for a windows output
-              process = subprocess.Popen(command_with_cd, stdout=subprocess.PIPE, shell=True)
-              output = process.communicate()[0]
-              if output != b'':
-                  return output
-    def sublime_command_line(self, args):
-        args.insert(0, self.get_sublime_path())
-        return subprocess.Popen(args)
+        rbenv_command = os.path.expanduser('~/.rbenv/shims/' + command)
+        process = subprocess.Popen(rbenv_command.split(), cwd=current_path, stdout=subprocess.PIPE)
+        output = process.communicate()[0]
+        if output == b'':
+            return None
+
+        return str(output, encoding='utf-8')
 
     def gemfile_folder(self):
-        root = self.window.folders()[0]
-        matches = []
-        for root, dirnames, filenames in os.walk(root):
-            for filename in fnmatch.filter(filenames, 'Gemfile'):
-                matches.append(os.path.join(root, filename))
-                break
-        if matches == []: return None
-        return os.path.dirname(matches[0])
-
-
-
-
-
-
-
+        folders = self.window.folders()
+        if len(folders) > 0:
+            return folders[0]
+        else:
+            view = self.window.active_view()
+            if view:
+                filename = view.file_name()
+                if filename:
+                    return os.path.dirname(filename)
